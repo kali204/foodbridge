@@ -5,6 +5,7 @@ const { v4: uuidv4 } = require("uuid");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
+const path = require("path"); // <-- added
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -89,19 +90,8 @@ function requireRole(role) {
 }
 
 ///////////////////////////////
-//  ROOT + HEALTH CHECK
+//  HEALTH CHECK
 ///////////////////////////////
-
-// Root route so hitting the base URL works
-app.get("/", (req, res) => {
-  res.send(`
-    <h1>FoodBridge Backend 🚀</h1>
-    <p>Server is running.</p>
-    <p>Try <code>/api/health</code> for JSON health status.</p>
-  `);
-});
-
-// Health check (also used by frontend / Render)
 app.get("/api/health", (req, res) => {
   const dbState = mongoose.connection.readyState; // 0 = disconnected, 1 = connected
   res.json({
@@ -285,6 +275,24 @@ app.patch(
     }
   }
 );
+
+///////////////////////////////
+//  SERVE FRONTEND (dist)
+///////////////////////////////
+
+// Absolute path to dist inside backend folder
+const distPath = path.join(__dirname, "dist");
+
+// Serve static assets
+app.use(express.static(distPath));
+
+// For any non-API route, send back index.html (SPA fallback)
+app.get("*", (req, res) => {
+  if (req.path.startsWith("/api")) {
+    return res.status(404).json({ message: "API route not found" });
+  }
+  res.sendFile(path.join(distPath, "index.html"));
+});
 
 ///////////////////////////////
 //  START SERVER
