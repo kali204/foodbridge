@@ -89,10 +89,27 @@ function requireRole(role) {
 }
 
 ///////////////////////////////
-//  HEALTH CHECK
+//  ROOT + HEALTH CHECK
 ///////////////////////////////
+
+// Root route so hitting the base URL works
+app.get("/", (req, res) => {
+  res.send(`
+    <h1>FoodBridge Backend 🚀</h1>
+    <p>Server is running.</p>
+    <p>Try <code>/api/health</code> for JSON health status.</p>
+  `);
+});
+
+// Health check (also used by frontend / Render)
 app.get("/api/health", (req, res) => {
-  res.json({ status: "ok" });
+  const dbState = mongoose.connection.readyState; // 0 = disconnected, 1 = connected
+  res.json({
+    status: "ok",
+    serverTime: new Date().toISOString(),
+    uptimeSeconds: Math.round(process.uptime()),
+    dbConnected: dbState === 1,
+  });
 });
 
 ///////////////////////////////
@@ -214,7 +231,7 @@ app.post(
   }
 );
 
-// Get open donations (NGO only)
+// Get donations (NGO only, optional status filter)
 app.get(
   "/api/donations",
   authMiddleware,
