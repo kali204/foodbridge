@@ -6,8 +6,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
 const app = express();
-const PORT = 5000;
-
+const PORT = process.env.PORT || 5000;
 // In a real app, use env variable
 const JWT_SECRET = "CHANGE_THIS_SECRET_IN_PRODUCTION";
 
@@ -218,6 +217,7 @@ app.patch(
 );
 
 // Start server
+
 app.listen(PORT, () => {
-  console.log(`Backend running on http://localhost:${PORT}`);
+  console.log(`Backend running on port ${PORT}`);
 });
