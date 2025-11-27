@@ -5,7 +5,7 @@ import DonationList from "./components/DonationList.jsx";
 import AuthForm from "./components/AuthForm.jsx";
 import "./App.css";
 
-const API_URL = "http://localhost:5000/api";
+const API_URL = "https://foodbridge-03p3.onrender.com";
 
 export default function App() {
   const [tab, setTab] = useState("donor"); // 'donor' | 'ngo'

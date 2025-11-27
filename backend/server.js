@@ -4,21 +4,57 @@ const cors = require("cors");
 const { v4: uuidv4 } = require("uuid");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-// In a real app, use env variable
-const JWT_SECRET = "CHANGE_THIS_SECRET_IN_PRODUCTION";
+
+// Use env var in production
+const JWT_SECRET = process.env.JWT_SECRET || "CHANGE_THIS_SECRET_IN_PRODUCTION";
 
 // Middlewares
 app.use(cors());
 app.use(express.json());
 
-// In-memory "database"
-let users = []; // { id, name, email, passwordHash, role }
-let donations = []; // same as before
+///////////////////////////////
+//  MONGO CONNECTION
+///////////////////////////////
+mongoose
+  .connect(process.env.MONGO_URI)
+  .then(() => console.log("✅ Connected to MongoDB"))
+  .catch((err) => console.error("❌ MongoDB connection error:", err));
 
-// Helpers
+///////////////////////////////
+//  MONGO SCHEMAS / MODELS
+///////////////////////////////
+
+// Only donations in DB for now
+const donationSchema = new mongoose.Schema(
+  {
+    donorId: String,
+    donorName: String,
+    phone: String,
+    address: String,
+    foodDetails: String,
+    quantity: String,
+    bestBeforeTime: String,
+    status: { type: String, default: "open" }, // 'open' | 'picked'
+    ngoName: { type: String, default: null },
+    ngoId: { type: String, default: null },
+  },
+  { timestamps: true }
+);
+
+const Donation = mongoose.model("Donation", donationSchema);
+
+///////////////////////////////
+//  IN-MEMORY USERS
+///////////////////////////////
+let users = []; // { id, name, email, passwordHash, role }
+
+///////////////////////////////
+//  HELPERS
+///////////////////////////////
 function generateToken(user) {
   return jwt.sign(
     { id: user.id, role: user.role, name: user.name },
@@ -52,14 +88,16 @@ function requireRole(role) {
   };
 }
 
-// Health check
+///////////////////////////////
+//  HEALTH CHECK
+///////////////////////////////
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-///////////////////////////////////////
-//   AUTH ROUTES
-///////////////////////////////////////
+///////////////////////////////
+//  AUTH ROUTES
+///////////////////////////////
 
 // Register (Donor or NGO)
 app.post("/api/auth/register", async (req, res) => {
@@ -96,7 +134,7 @@ app.post("/api/auth/register", async (req, res) => {
       user: { id: user.id, name: user.name, email: user.email, role: user.role },
     });
   } catch (err) {
-    console.error(err);
+    console.error("Register error:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
@@ -126,51 +164,53 @@ app.post("/api/auth/login", async (req, res) => {
       user: { id: user.id, name: user.name, email: user.email, role: user.role },
     });
   } catch (err) {
-    console.error(err);
+    console.error("Login error:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
-///////////////////////////////////////
-//   DONATION ROUTES (PROTECTED)
-///////////////////////////////////////
+///////////////////////////////
+//  DONATION ROUTES (MongoDB)
+///////////////////////////////
 
 // Create a donation (Donor only)
 app.post(
   "/api/donations",
   authMiddleware,
   requireRole("donor"),
-  (req, res) => {
-    const {
-      donorName,
-      phone,
-      address,
-      foodDetails,
-      quantity,
-      bestBeforeTime,
-    } = req.body;
+  async (req, res) => {
+    try {
+      const {
+        donorName,
+        phone,
+        address,
+        foodDetails,
+        quantity,
+        bestBeforeTime,
+      } = req.body;
 
-    if (!phone || !address || !foodDetails) {
-      return res.status(400).json({ message: "Missing required fields" });
+      if (!phone || !address || !foodDetails) {
+        return res.status(400).json({ message: "Missing required fields" });
+      }
+
+      const donation = await Donation.create({
+        donorId: req.user.id,
+        donorName: donorName || req.user.name,
+        phone,
+        address,
+        foodDetails,
+        quantity: quantity || "",
+        bestBeforeTime: bestBeforeTime || "",
+        status: "open",
+        ngoName: null,
+        ngoId: null,
+      });
+
+      res.status(201).json(donation);
+    } catch (err) {
+      console.error("Create donation error:", err);
+      res.status(500).json({ message: "Server error" });
     }
-
-    const donation = {
-      id: uuidv4(),
-      donorId: req.user.id,
-      donorName: donorName || req.user.name,
-      phone,
-      address,
-      foodDetails,
-      quantity: quantity || "",
-      bestBeforeTime: bestBeforeTime || "",
-      status: "open", // 'open' | 'picked'
-      ngoName: null,
-      ngoId: null,
-      createdAt: new Date().toISOString(),
-    };
-
-    donations.push(donation);
-    res.status(201).json(donation);
   }
 );
 
@@ -179,15 +219,21 @@ app.get(
   "/api/donations",
   authMiddleware,
   requireRole("ngo"),
-  (req, res) => {
-    const { status } = req.query;
-    let result = donations;
+  async (req, res) => {
+    try {
+      const { status } = req.query;
+      const query = {};
 
-    if (status) {
-      result = donations.filter((d) => d.status === status);
+      if (status) {
+        query.status = status;
+      }
+
+      const donations = await Donation.find(query).sort({ createdAt: -1 });
+      res.json(donations);
+    } catch (err) {
+      console.error("Get donations error:", err);
+      res.status(500).json({ message: "Server error" });
     }
-
-    res.json(result);
   }
 );
 
@@ -196,28 +242,36 @@ app.patch(
   "/api/donations/:id/pick",
   authMiddleware,
   requireRole("ngo"),
-  (req, res) => {
-    const { id } = req.params;
+  async (req, res) => {
+    try {
+      const { id } = req.params;
 
-    const donation = donations.find((d) => d.id === id);
-    if (!donation) {
-      return res.status(404).json({ message: "Donation not found" });
+      const donation = await Donation.findById(id);
+      if (!donation) {
+        return res.status(404).json({ message: "Donation not found" });
+      }
+
+      if (donation.status === "picked") {
+        return res.status(400).json({ message: "Already picked" });
+      }
+
+      donation.status = "picked";
+      donation.ngoName = req.user.name;
+      donation.ngoId = req.user.id;
+
+      await donation.save();
+
+      res.json(donation);
+    } catch (err) {
+      console.error("Pick donation error:", err);
+      res.status(500).json({ message: "Server error" });
     }
-
-    if (donation.status === "picked") {
-      return res.status(400).json({ message: "Already picked" });
-    }
-
-    donation.status = "picked";
-    donation.ngoName = req.user.name;
-    donation.ngoId = req.user.id;
-
-    res.json(donation);
   }
 );
 
-// Start server
-
+///////////////////////////////
+//  START SERVER
+///////////////////////////////
 app.listen(PORT, () => {
   console.log(`Backend running on port ${PORT}`);
 });
